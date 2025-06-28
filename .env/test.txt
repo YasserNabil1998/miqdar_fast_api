@@ -1,0 +1,22 @@
+/home/ubuntu/miqdar_fast_api/
+│
+├── app/                    # الكود الرئيسي (FastAPI)
+│   ├── main.py             # API الموحد
+│   └── utils.py            # وظائف مساعدة
+│
+├── models/                 # النموذج المحمل محليًا (إذا أردت)
+│   └── stable-diffusion/
+│       └── controlnet/
+│
+├── cache/                  # كاش Hugging Face
+│
+├── logs/                   # ملفات الأخطاء
+│   └── app.log
+│
+├── scripts/                # سكربتات التشغيل والتحديث
+│   ├── run.sh
+│   └── update.sh
+│
+├── .env                    # إعدادات حساسة
+├── requirements.txt
+└── README.md
