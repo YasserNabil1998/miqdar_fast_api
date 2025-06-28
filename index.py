@@ -149,7 +149,7 @@ async def process_image(
 
                 try:
                     response = requests.post(
-                        "http://localhost:8002/generate-image/",
+                        "http://ec2-16-170-228-225.eu-north-1.compute.amazonaws.com:8002/generate-image/",
                         data={
                             "edge_map_base64": encoded_edge_map,
                             "prompt": prompt
