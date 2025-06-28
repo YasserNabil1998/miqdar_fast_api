@@ -20,14 +20,17 @@ async def generate_image_base64(
     global controlnet, stable_diff_pipe
 
     if controlnet is None or stable_diff_pipe is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        # تعيين الجهاز بشكل ثابت على CPU لأن GPU غير متوفر
+        device = "cpu"
+
+        # استخدام float32 لأن float16 غير مدعوم بشكل جيد على CPU
+        dtype = torch.float32
 
         controlnet_model_id = "lllyasviel/control_v11p_sd15_canny"
         controlnet = ControlNetModel.from_pretrained(
             controlnet_model_id,
             torch_dtype=dtype,
-            variant="fp16" if device == "cuda" else None
+            variant=None  # لا نستخدم fp16 على CPU
         )
         stable_diff_pipe = StableDiffusionControlNetPipeline.from_pretrained(
             "CompVis/stable-diffusion-v1-4",
@@ -35,8 +38,9 @@ async def generate_image_base64(
             torch_dtype=dtype
         ).to(device)
 
-        if device == "cuda":
-            stable_diff_pipe.enable_xformers_memory_efficient_attention()
+        # على CPU لا نفعل ميزة xformers
+        # if device == "cuda":
+        #     stable_diff_pipe.enable_xformers_memory_efficient_attention()
 
     try:
         image_data = base64.b64decode(edge_map_base64)
@@ -46,8 +50,8 @@ async def generate_image_base64(
             result = stable_diff_pipe(
                 prompt=prompt,
                 image=edge_map,
-                guidance_scale=4.5,          # تقليل عن 5.0
-                num_inference_steps=7       # تقليل عن 10
+                guidance_scale=3.0,          # خفضت القيمة عن 4.5 لتقليل الحمل
+                num_inference_steps=5       # خفضت الخطوات عن 7 لتسريع وتقليل استهلاك الذاكرة
             )
 
         generated_image = result.images[0]
