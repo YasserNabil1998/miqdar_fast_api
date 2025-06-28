@@ -150,13 +150,12 @@ async def process_image(
                 try:
                     response = requests.post(
                         "http://ec2-16-170-228-225.eu-north-1.compute.amazonaws.com:8002/generate-image/",
-                        json={
+                        data={
                             "edge_map_base64": encoded_edge_map,
                             "prompt": prompt
                         },
                         timeout=None
                     )
-
 
                     if response.status_code == 200:
                         results["generate-image"] = {
