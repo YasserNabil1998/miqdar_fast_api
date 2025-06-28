@@ -8,15 +8,10 @@ import base64
 from sklearn.cluster import KMeans
 from typing import Optional
 import time
+import requests  # لإرسال الطلب لـ API التوليد
 import torch
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
-import logging
 
 app = FastAPI()
-
-# نموذج الذكاء الاصطناعي
-controlnet = None
-stable_diff_pipe = None
 
 def convert_units(w_px, h_px, px_per_cm):
     w_cm = w_px / px_per_cm
@@ -37,43 +32,6 @@ def preprocess_image(pil_image):
     if max(pil_image.size) > max_dim:
         pil_image = pil_image.resize((max_dim, max_dim), Image.Resampling.LANCZOS)
     return np.array(pil_image), pil_image
-
-def generate_image_internal(edge_map_base64: str, prompt: str):
-    global controlnet, stable_diff_pipe
-
-    if controlnet is None or stable_diff_pipe is None:
-        device = "cpu"
-        dtype = torch.float32
-
-        controlnet_model_id = "lllyasviel/control_v11p_sd15_canny"
-        controlnet = ControlNetModel.from_pretrained(
-            controlnet_model_id,
-            torch_dtype=dtype
-        )
-        stable_diff_pipe = StableDiffusionControlNetPipeline.from_pretrained(
-            "CompVis/stable-diffusion-v1-4",
-            controlnet=controlnet,
-            torch_dtype=dtype
-        ).to(device)
-
-    image_data = base64.b64decode(edge_map_base64)
-    edge_map = Image.open(io.BytesIO(image_data)).convert("RGB")
-
-    with torch.inference_mode():
-        result = stable_diff_pipe(
-            prompt=prompt,
-            image=edge_map,
-            guidance_scale=3.0,
-            num_inference_steps=5
-        )
-
-    generated_image = result.images[0]
-    img_bytes = io.BytesIO()
-    generated_image.save(img_bytes, format="PNG")
-    encoded_img = base64.b64encode(img_bytes.getvalue()).decode("utf-8")
-
-    return encoded_img
-
 
 @app.post("/process/")
 async def process_image(
@@ -173,8 +131,12 @@ async def process_image(
             if target_height_cm is None:
                 results["generate-image"] = {"error": "مطلوب target_height_cm"}
             else:
-                image_np_small, _ = preprocess_image(image)
+                image_np_small, pil_image_resized = preprocess_image(image)
                 image_bgr = cv2.cvtColor(image_np_small, cv2.COLOR_RGB2BGR)
+
+                height_px = image_np_small.shape[0]
+                px_per_cm = height_px / target_height_cm
+
                 edge_map = get_edge_map(image_bgr)
                 edge_map_pil = Image.fromarray(edge_map)
 
@@ -183,20 +145,36 @@ async def process_image(
                 encoded_edge_map = base64.b64encode(img_bytes.getvalue()).decode()
 
                 prompt = f"A coffee pot with {target_height_cm} cm height."
+                # timeout = 600 if not torch.cuda.is_available() else 30
 
                 try:
-                    preview_base64 = generate_image_internal(encoded_edge_map, prompt)
+                    response = requests.post(
+                        "http://ec2-16-170-228-225.eu-north-1.compute.amazonaws.com:8002/generate-image/",
+                        data={
+                            "edge_map_base64": encoded_edge_map,
+                            "prompt": prompt
+                        },
+                        timeout=None
+                    )
+
+                    if response.status_code == 200:
+                        results["generate-image"] = {
+                            "message": "تم إنشاء الصورة بنجاح",
+                            "preview_base64": response.json().get("preview_base64"),
+                            "product_name": product_name,
+                            "user_width": user_width,
+                            "user_height": user_height,
+                            "time_sec": round(time.time() - start, 2)
+                        }
+                    else:
+                        results["generate-image"] = {
+                            "error": f"فشل توليد الصورة - كود: {response.status_code}",
+                            "details": response.text
+                        }
+
+                except requests.exceptions.RequestException as e:
                     results["generate-image"] = {
-                        "message": "تم إنشاء الصورة بنجاح",
-                        "preview_base64": preview_base64,
-                        "product_name": product_name,
-                        "user_width": user_width,
-                        "user_height": user_height,
-                        "time_sec": round(time.time() - start, 2)
-                    }
-                except Exception as e:
-                    results["generate-image"] = {
-                        "error": "فشل توليد الصورة",
+                        "error": "فشل الاتصال بخدمة توليد الصورة",
                         "details": str(e)
                     }
 
@@ -206,5 +184,4 @@ async def process_image(
     except UnidentifiedImageError:
         return JSONResponse(content={"error": "الصورة غير صالحة"}, status_code=400)
     except Exception as e:
-        logging.exception("❌ خطأ في /process/")
         return JSONResponse(content={"error": str(e)}, status_code=500)
